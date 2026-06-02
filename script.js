@@ -66,7 +66,7 @@
                 img.onerror = () => {
                     resolve();
                 };
-                img.src = CONFIG.frameDir + 'frame_' + padNumber(i) + '.jpg';
+                img.src = CONFIG.frameDir + 'ezgif-frame-' + padNumber(i) + '.jpg';
             }));
         }
 
