@@ -2,8 +2,10 @@
     'use strict';
 
     const CONFIG = {
-        videoSrc: './frame/0602.mp4',
+        frameDir: './frame/',
+        maxFramesToCheck: 250,
         particleCount: 60,
+        pinDurationPerFrame: 200,
         headlines: [
             { id: 'headline1', start: 0.00, peak: 0.05, end: 0.16 },
             { id: 'headline2', start: 0.20, peak: 0.28, end: 0.38 },
@@ -39,24 +41,43 @@
     const progressBar = document.getElementById('progressBar');
     const scrollIndicator = document.getElementById('scrollIndicator');
 
-    const video = document.createElement('video');
-    video.preload = 'auto';
-    video.muted = true;
-    video.playsInline = true;
-    video.loop = false;
-    video.src = CONFIG.videoSrc;
-
-    let videoReady = false;
-    let currentTime = 0;
-    let targetTime = 0;
+    let frames = [];
+    let currentFrame = 0;
+    let targetFrame = 0;
     let scrollProgress = 0;
     let particles = [];
     let rafId = null;
 
-    video.addEventListener('loadedmetadata', () => {
-        videoReady = true;
-        video.currentTime = 0;
-    });
+    function padNumber(n) {
+        return String(n).padStart(3, '0');
+    }
+
+    async function loadFrames() {
+        const promises = [];
+        const validFrames = [];
+
+        for (let i = 1; i <= CONFIG.maxFramesToCheck; i++) {
+            promises.push(new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    validFrames.push({ index: i, img: img });
+                    resolve();
+                };
+                img.onerror = () => {
+                    resolve();
+                };
+                img.src = CONFIG.frameDir + 'ezgif-frame-' + padNumber(i) + '.jpg';
+            }));
+        }
+
+        await Promise.all(promises);
+
+        validFrames.sort((a, b) => a.index - b.index);
+        frames = validFrames.map(f => f.img);
+
+        CONFIG.totalFrames = frames.length;
+        CONFIG.pinDuration = CONFIG.totalFrames * CONFIG.pinDurationPerFrame;
+    }
 
     function resizeCanvas() {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -72,35 +93,39 @@
         particlesCanvas.style.height = window.innerHeight + 'px';
         pCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        drawFrame();
+        drawFrame(Math.round(currentFrame));
     }
 
-    function drawFrame() {
-        if (!videoReady || video.readyState < 2) return;
+    function drawFrame(index) {
+        const img = frames[index];
+        if (!img || !img.complete || !img.naturalWidth) return;
 
         const cw = window.innerWidth;
         const ch = window.innerHeight;
 
         ctx.clearRect(0, 0, cw, ch);
 
-        const vw = video.videoWidth;
-        const vh = video.videoHeight;
-        const imgRatio = vw / vh;
+        const cropRight = 2;
+        const cropBottom = 2;
+        const cropW = img.naturalWidth - cropRight;
+        const cropH = img.naturalHeight - cropBottom;
+        const imgRatio = cropW / cropH;
         const canvasRatio = cw / ch;
 
         let s;
+
         if (canvasRatio > imgRatio) {
-            s = cw / vw;
+            s = cw / cropW;
         } else {
-            s = ch / vh;
+            s = ch / cropH;
         }
 
-        const dw = vw * s;
-        const dh = vh * s;
+        const dw = cropW * s;
+        const dh = cropH * s;
         const dx = (cw - dw) / 2;
         const dy = (ch - dh) / 2;
 
-        ctx.drawImage(video, dx, dy, dw, dh);
+        ctx.drawImage(img, 0, 0, cropW, cropH, dx, dy, dw, dh);
     }
 
     function getTextOpacity(progress, start, peak, end) {
@@ -223,13 +248,9 @@
     function animate() {
         rafId = requestAnimationFrame(animate);
 
-        currentTime += (targetTime - currentTime) * 0.18;
-
-        if (videoReady) {
-            video.currentTime = currentTime;
-        }
-
-        drawFrame();
+        currentFrame += (targetFrame - currentFrame) * 0.18;
+        const frameIndex = Math.min(Math.round(currentFrame), CONFIG.totalFrames - 1);
+        drawFrame(frameIndex);
 
         updateTextElements(scrollProgress);
         updateGlow(scrollProgress);
@@ -246,9 +267,7 @@
             scrollProgress += delta;
             scrollProgress = Math.max(0, Math.min(1, scrollProgress));
 
-            if (videoReady) {
-                targetTime = scrollProgress * video.duration;
-            }
+            targetFrame = scrollProgress * (CONFIG.totalFrames - 1);
 
             if (scrollProgress > 0.02) {
                 scrollIndicator.classList.add('hidden');
@@ -287,10 +306,16 @@
         }, 150);
     }
 
-    function init() {
+    async function init() {
         resizeCanvas();
         initParticles();
+
+        await loadFrames();
+
+        drawFrame(0);
+
         initScroll();
+
         animate();
 
         window.addEventListener('resize', onResize);
